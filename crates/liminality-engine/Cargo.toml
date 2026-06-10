@@ -1,0 +1,8 @@
+[package]
+name = "liminality-engine"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+liminality-model = { path = "../liminality-model" }
+thiserror = "1.0"

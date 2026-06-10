@@ -1,0 +1,19 @@
+[workspace]
+members = [
+    "crates/liminality-model",
+    "crates/liminality-engine",
+    "crates/liminality-protocol",
+    "crates/liminality-daemon",
+]
+resolver = "2"
+
+[package]
+name = "liminality"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+liminality-model = { path = "crates/liminality-model" }
+liminality-engine = { path = "crates/liminality-engine" }
+liminality-protocol = { path = "crates/liminality-protocol" }
