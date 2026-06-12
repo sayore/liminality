@@ -5,6 +5,8 @@
 //!
 //! It contains no simulation logic, no networking, and no daemon/runtime behavior.
 
+use serde::{Deserialize, Serialize};
+
 pub fn add(left: u64, right: u64) -> u64 {
     left + right
 }
@@ -20,12 +22,22 @@ mod tests {
     }
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Position {
     pub x: f64,
     pub y: f64,
     pub z: f64,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct SpacePos {
+    pub w: String,
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Resource {
     pub id: String,
     pub quantity: u32,
