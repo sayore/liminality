@@ -4,17 +4,20 @@
 //! It depends on liminality-model.
 //! It must not own simulation logic.
 
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
+use liminality_model::WorldModel;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorldSnapshot {
+    pub state: WorldModel,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Query {
+    pub seconds: u64,
+}
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Response {
+    pub state: WorldSnapshot,
 }

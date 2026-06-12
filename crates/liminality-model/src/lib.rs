@@ -5,28 +5,34 @@
 //!
 //! It contains no simulation logic, no networking, and no daemon/runtime behavior.
 
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+use serde::{Deserialize, Serialize};
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
-
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Position {
     pub x: f64,
     pub y: f64,
     pub z: f64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Resource {
     pub id: String,
     pub quantity: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct WorldModel {
+    pub coal_storage: u32,
+    pub ore_storage: u32,
+    pub output_storage: u32,
+}
+
+impl WorldModel {
+    pub fn furnace_line_demo() -> Self {
+        Self {
+            coal_storage: 32,
+            ore_storage: 128,
+            output_storage: 0,
+        }
+    }
 }
