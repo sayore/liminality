@@ -37,6 +37,23 @@ pub struct Resource {
     pub quantity: u32,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct WorldModel {
+    pub coal_storage: u32,
+    pub ore_storage: u32,
+    pub output_storage: u32,
+}
+
+impl WorldModel {
+    pub fn furnace_line_demo() -> Self {
+        Self {
+            coal_storage: 32,
+            ore_storage: 128,
+            output_storage: 0,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::contract::TransformerContract;

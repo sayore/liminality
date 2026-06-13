@@ -1,13 +1,13 @@
 //! liminality-protocol
 //!
-//! This crate defines serializable DTOs/messages for snapshots, deltas, queries, and responses.
+//! This crate defines serializable DTOs/messages for snapshots, deltas, queries,
+//! responses, and small local demo endpoints.
 //! It depends on liminality-model.
 //! It must not own simulation logic.
 
-use liminality_model::{Resource, SpacePos};
+use liminality_model::{Resource, SpacePos, WorldModel};
 use serde::{Deserialize, Serialize};
 
-/// 1. Handshake Role
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum Role {
     BrowserUi,
@@ -16,7 +16,6 @@ pub enum Role {
     Unknown,
 }
 
-/// Handshake Messages
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct ClientHello {
     pub protocol_version: u32,
@@ -31,21 +30,18 @@ pub struct ServerHello {
     pub server_name: String,
 }
 
-/// 2. Snapshot
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct WorldSnapshot {
     pub protocol_version: u32,
     pub model_version: u32,
     pub current_sim_time: u64,
     pub spaces: Vec<String>,
-    // Assuming simple string representation for nodes and edges for now as generic DTOs
     pub nodes: Vec<String>,
     pub edges: Vec<String>,
     pub resource_registry_summary: Vec<String>,
     pub contract_registry_summary: Vec<String>,
 }
 
-/// 3. Delta
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum WorldDelta {
     NodeAdded { node_id: String },
@@ -59,43 +55,31 @@ pub enum WorldDelta {
     FullResyncRequired,
 }
 
-/// 4. Query
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum Query {
-    StateAt {
-        time: u64,
-    },
-    NodeAt {
-        pos: SpacePos,
-    },
-    NodeView {
-        node: String,
-        time: u64,
-    },
+    StateAt { time: u64 },
+    NodeAt { pos: SpacePos },
+    NodeView { node: String, time: u64 },
     RegionView {
         space: String,
         min: SpacePos,
         max: SpacePos,
         time: u64,
     },
-    PredictUntil {
-        time: u64,
-    },
+    PredictUntil { time: u64 },
     WorldSnapshot,
 }
 
-/// 5. Response
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum Response {
     Snapshot(WorldSnapshot),
-    StateAt(String),    // Placeholder for actual state representation
-    NodeView(String),   // Placeholder for actual node representation
-    RegionView(String), // Placeholder for actual region representation
-    Prediction(String), // Placeholder for actual prediction representation
+    StateAt(String),
+    NodeView(String),
+    RegionView(String),
+    Prediction(String),
     Error(String),
 }
 
-/// 6. Events from bridge
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum BridgeEvent {
     ExternalNodeObserved {
@@ -118,13 +102,27 @@ pub enum BridgeEvent {
     },
 }
 
-/// Protocol Envelope
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct ProtocolEnvelope<T> {
     pub message_id: String,
     pub protocol_version: u32,
     pub timestamp: Option<u64>,
     pub payload: T,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DemoWorldSnapshot {
+    pub state: WorldModel,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DemoQuery {
+    pub seconds: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DemoResponse {
+    pub state: DemoWorldSnapshot,
 }
 
 #[cfg(test)]
@@ -228,5 +226,22 @@ mod tests {
         let json = serde_json::to_string(&envelope).unwrap();
         let deserialized: ProtocolEnvelope<WorldDelta> = serde_json::from_str(&json).unwrap();
         assert_eq!(envelope, deserialized);
+    }
+
+    #[test]
+    fn test_demo_roundtrip() {
+        let query = DemoQuery { seconds: 600 };
+        let query_json = serde_json::to_string(&query).unwrap();
+        let query_back: DemoQuery = serde_json::from_str(&query_json).unwrap();
+        assert_eq!(query, query_back);
+
+        let response = DemoResponse {
+            state: DemoWorldSnapshot {
+                state: WorldModel::furnace_line_demo(),
+            },
+        };
+        let response_json = serde_json::to_string(&response).unwrap();
+        let response_back: DemoResponse = serde_json::from_str(&response_json).unwrap();
+        assert_eq!(response, response_back);
     }
 }
