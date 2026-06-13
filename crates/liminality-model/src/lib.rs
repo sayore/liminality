@@ -1,6 +1,8 @@
 //! The pure data model for Liminality.
 //! This crate is the canonical representation of a simulated logistics world.
 
+use serde::{Deserialize, Serialize};
+
 pub mod contract;
 pub mod edge;
 pub mod error;
@@ -12,9 +14,31 @@ pub mod space;
 pub mod time;
 pub mod world;
 
+// Legacy DTOs kept at the crate root so the protocol slice merged on main
+// continues to compile while the richer model modules land underneath.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Position {
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct SpacePos {
+    pub w: String,
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Resource {
+    pub id: String,
+    pub quantity: u32,
+}
+
 #[cfg(test)]
 mod tests {
-
     use crate::contract::TransformerContract;
     use crate::filter::{GateExpr, ResourceFilter};
     use crate::id::{ContractId, ResourceId, SpaceId};
@@ -37,15 +61,12 @@ mod tests {
         let mut ledger = ResourceLedger::new();
         let res_id = ResourceId::from("iron_ingot");
 
-        // Add
         assert!(ledger.add_amount(res_id.clone(), Amount(100)).is_ok());
         assert_eq!(ledger.get_amount(&res_id), Amount(100));
 
-        // Subtract
         assert!(ledger.subtract_amount(&res_id, Amount(40)).is_ok());
         assert_eq!(ledger.get_amount(&res_id), Amount(60));
 
-        // Subtract exact remaining
         assert!(ledger.subtract_amount(&res_id, Amount(60)).is_ok());
         assert_eq!(ledger.get_amount(&res_id), Amount(0));
     }
@@ -105,7 +126,6 @@ mod tests {
             )))),
         );
 
-        // Serialize to test it doesn't loop/crash and can be handled
         let serialized = serde_json::to_string(&expr).unwrap();
         let deserialized: GateExpr = serde_json::from_str(&serialized).unwrap();
         assert_eq!(expr, deserialized);
