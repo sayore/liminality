@@ -5,7 +5,14 @@
 //! It must support debug tick and predictive modes eventually.
 
 use std::collections::HashMap;
+
+use liminality_model::WorldModel;
 use thiserror::Error;
+
+const COAL_ID: &str = "coal";
+const ORE_ID: &str = "iron_ore";
+const INGOT_ID: &str = "iron_ingot";
+const FURNACE_ID: &str = "furnace_1";
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SimMode {
@@ -129,8 +136,6 @@ impl SimulationEngine {
                     let next_time =
                         std::cmp::min(current_time + config.tick_duration_secs, target_time);
                     let delta = next_time - current_time;
-
-                    // Apply one step
                     let result = self.step_debug(&current_state, delta);
                     current_state = result.0;
                     stop_reason = result.1;
@@ -145,7 +150,7 @@ impl SimulationEngine {
                 })
             }
             SimMode::Predictive(_) => self.predict_until(target_time),
-            SimMode::Hybrid(_) => unimplemented!(),
+            SimMode::Hybrid(_) => self.predict_until(target_time),
         }
     }
 
@@ -162,9 +167,7 @@ impl SimulationEngine {
                     fuel_ops_left: 0,
                 });
 
-            // Iterate second by second to handle fine-grained state updates correctly
             for _ in 0..delta {
-                // Check if we need fuel
                 if t_state.fuel_ops_left == 0 {
                     let fuel_available = next_state
                         .resources
@@ -183,7 +186,6 @@ impl SimulationEngine {
                     }
                 }
 
-                // Check input
                 let input_available = next_state
                     .resources
                     .get(&transformer.input_id)
@@ -194,7 +196,6 @@ impl SimulationEngine {
                     break;
                 }
 
-                // Check output capacity
                 let current_output = next_state
                     .resources
                     .get(&transformer.output_id)
@@ -214,12 +215,10 @@ impl SimulationEngine {
                 t_state.progress_secs += 1;
 
                 if t_state.progress_secs >= transformer.duration_secs {
-                    // Consume input
                     *next_state
                         .resources
                         .entry(transformer.input_id.clone())
                         .or_insert(0) -= transformer.input_qty;
-                    // Produce output
                     *next_state
                         .resources
                         .entry(transformer.output_id.clone())
@@ -251,7 +250,6 @@ impl SimulationEngine {
         let mut final_stop_reason = None;
         let mut actual_delta = delta;
 
-        // Find the earliest stopping event
         if let Some(event) = self.next_event_after(self.base_state.time)
             && event.time <= target_time
         {
@@ -278,12 +276,12 @@ impl SimulationEngine {
                 }
 
                 let total_ops_to_cover = ops.saturating_sub(t_state.fuel_ops_left);
-
                 let new_fuel_needed = if total_ops_to_cover > 0 {
                     total_ops_to_cover.div_ceil(transformer.fuel_ops)
+                } else if t_state.fuel_ops_left == 0 {
+                    1
                 } else {
-                    // Check if we need initial fuel at all
-                    if t_state.fuel_ops_left == 0 { 1 } else { 0 }
+                    0
                 };
 
                 if new_fuel_needed > 0
@@ -302,6 +300,7 @@ impl SimulationEngine {
                         .insert(transformer.output_id.clone(), ops * transformer.output_qty);
                 }
             }
+
             computed_t_states.insert(transformer.id.clone(), t_state);
         }
 
@@ -353,20 +352,10 @@ impl SimulationEngine {
                 .unwrap_or(u32::MAX);
 
             let output_space = max_output.saturating_sub(current_output);
-
             let max_ops_input = input_available / transformer.input_qty;
             let max_ops_fuel = fuel_available * transformer.fuel_ops + t_state.fuel_ops_left;
             let max_ops_output = output_space / transformer.output_qty;
-
             let limiting_ops = max_ops_input.min(max_ops_fuel).min(max_ops_output);
-
-            // If limiting ops is 0, we are blocked immediately.
-            // Actually, if we have 0 input but we haven't completed any progress, we are blocked at progress=0.
-            if limiting_ops == 0 {
-                // If we are already mid-progress we'd be blocked when we try to start the NEXT one,
-                // but we might not even be able to start the first one.
-            }
-
             let time_to_stop =
                 (limiting_ops as u64) * transformer.duration_secs - t_state.progress_secs;
             let event_time = self.base_state.time + time_to_stop;
@@ -406,160 +395,251 @@ impl SimulationEngine {
     }
 }
 
+pub fn simulate_furnace_line(start_state: &WorldModel, seconds: u64) -> WorldModel {
+    let engine = SimulationEngine::new(
+        furnace_line_base_state(start_state),
+        SimMode::Predictive(PredictiveConfig {}),
+    );
+    let computed_state = engine
+        .state_at(seconds)
+        .expect("predictive furnace-line simulation should be valid");
+    world_model_from_computed_state(&computed_state)
+}
+
+fn furnace_line_base_state(start_state: &WorldModel) -> BaseState {
+    let mut resources = HashMap::new();
+    resources.insert(COAL_ID.to_string(), start_state.coal_storage);
+    resources.insert(ORE_ID.to_string(), start_state.ore_storage);
+    resources.insert(INGOT_ID.to_string(), start_state.output_storage);
+
+    let mut capacities = HashMap::new();
+    capacities.insert(INGOT_ID.to_string(), 64);
+
+    let transformer = Transformer {
+        id: FURNACE_ID.to_string(),
+        input_id: ORE_ID.to_string(),
+        input_qty: 1,
+        fuel_id: COAL_ID.to_string(),
+        fuel_ops: 8,
+        output_id: INGOT_ID.to_string(),
+        output_qty: 1,
+        duration_secs: 10,
+    };
+
+    BaseState {
+        time: 0,
+        resources,
+        capacities,
+        transformers: vec![transformer],
+        transformer_states: HashMap::new(),
+    }
+}
+
+fn world_model_from_computed_state(state: &ComputedState) -> WorldModel {
+    WorldModel {
+        coal_storage: state.resources.get(COAL_ID).copied().unwrap_or(0),
+        ore_storage: state.resources.get(ORE_ID).copied().unwrap_or(0),
+        output_storage: state.resources.get(INGOT_ID).copied().unwrap_or(0),
+    }
+}
+
+#[cfg(test)]
+fn create_test_base_state() -> BaseState {
+    furnace_line_base_state(&WorldModel::furnace_line_demo())
+}
+
+#[cfg(test)]
+fn create_low_capacity_state(output_capacity: u32) -> BaseState {
+    let mut state = create_test_base_state();
+    state.capacities.insert(INGOT_ID.to_string(), output_capacity);
+    state
+}
+
+#[cfg(test)]
+fn create_sparse_input_state(ore: u32) -> BaseState {
+    let mut state = create_test_base_state();
+    state.resources.insert(ORE_ID.to_string(), ore);
+    state
+}
+
+#[cfg(test)]
+fn assert_world_model(state: &WorldModel, ingots: u32, ore: u32, coal: u32) {
+    assert_eq!(state.output_storage, ingots);
+    assert_eq!(state.ore_storage, ore);
+    assert_eq!(state.coal_storage, coal);
+}
+
+#[cfg(test)]
+fn assert_computed_resources(state: &ComputedState, ingots: u32, ore: u32, coal: u32) {
+    assert_eq!(state.resources.get(INGOT_ID), Some(&ingots));
+    assert_eq!(state.resources.get(ORE_ID), Some(&ore));
+    assert_eq!(state.resources.get(COAL_ID), Some(&coal));
+}
+
+#[cfg(test)]
+fn assert_stop_reason(state: &ComputedState, reason: Option<StopReason>) {
+    assert_eq!(state.stop_reason, reason);
+}
+
+#[cfg(test)]
+fn assert_state_time(state: &ComputedState, time: u64) {
+    assert_eq!(state.time, time);
+}
+
+#[cfg(test)]
+fn predictive_engine() -> SimulationEngine {
+    SimulationEngine::new(create_test_base_state(), SimMode::Predictive(PredictiveConfig {}))
+}
+
+#[cfg(test)]
+fn debug_engine(tick_duration_secs: u64) -> SimulationEngine {
+    SimulationEngine::new(
+        create_test_base_state(),
+        SimMode::DebugTick(DebugTickConfig { tick_duration_secs }),
+    )
+}
+
+#[cfg(test)]
+fn low_capacity_debug_engine(output_capacity: u32, tick_duration_secs: u64) -> SimulationEngine {
+    SimulationEngine::new(
+        create_low_capacity_state(output_capacity),
+        SimMode::DebugTick(DebugTickConfig { tick_duration_secs }),
+    )
+}
+
+#[cfg(test)]
+fn sparse_input_predictive_engine(ore: u32) -> SimulationEngine {
+    SimulationEngine::new(
+        create_sparse_input_state(ore),
+        SimMode::Predictive(PredictiveConfig {}),
+    )
+}
+
+#[cfg(test)]
+fn simulated_world(seconds: u64) -> WorldModel {
+    simulate_furnace_line(&WorldModel::furnace_line_demo(), seconds)
+}
+
+#[cfg(test)]
+fn assert_simulated_world(seconds: u64, ingots: u32, ore: u32, coal: u32) {
+    let state = simulated_world(seconds);
+    assert_world_model(&state, ingots, ore, coal);
+}
+
+#[cfg(test)]
+fn assert_prediction_matches_debug(seconds: u64) {
+    let state_debug = debug_engine(1).state_at(seconds).unwrap();
+    let state_pred = predictive_engine().state_at(seconds).unwrap();
+
+    assert_eq!(state_debug.time, state_pred.time);
+    assert_eq!(state_debug.resources, state_pred.resources);
+    assert_eq!(state_debug.stop_reason, state_pred.stop_reason);
+}
+
+#[cfg(test)]
+fn assert_materialized_state(seconds: u64, ingots: u32, coal: u32) {
+    let mut engine = predictive_engine();
+    engine.materialize_at(seconds).unwrap();
+
+    assert_eq!(engine.base_state.time, seconds);
+    assert_eq!(engine.base_state.resources.get(INGOT_ID), Some(&ingots));
+    assert_eq!(engine.base_state.resources.get(COAL_ID), Some(&coal));
+}
+
+#[cfg(test)]
+fn assert_sparse_input_stop(ore: u32, seconds: u64, stop_time: u64, ingots: u32) {
+    let state = sparse_input_predictive_engine(ore).state_at(seconds).unwrap();
+
+    assert_state_time(&state, stop_time);
+    assert_eq!(state.resources.get(INGOT_ID), Some(&ingots));
+    assert_eq!(state.resources.get(ORE_ID), Some(&0));
+    assert_stop_reason(&state, Some(StopReason::InputEmpty));
+}
+
+#[cfg(test)]
+fn assert_low_capacity_stop(output_capacity: u32, seconds: u64, stop_time: u64) {
+    let state = low_capacity_debug_engine(output_capacity, 10)
+        .state_at(seconds)
+        .unwrap();
+
+    assert_state_time(&state, stop_time);
+    assert_eq!(state.resources.get(INGOT_ID), Some(&output_capacity));
+    assert_stop_reason(&state, Some(StopReason::OutputFull));
+}
+
+#[cfg(test)]
+fn assert_predictive_state(seconds: u64, time: u64, ingots: u32, ore: u32, coal: u32, reason: Option<StopReason>) {
+    let state = predictive_engine().state_at(seconds).unwrap();
+    assert_state_time(&state, time);
+    assert_computed_resources(&state, ingots, ore, coal);
+    assert_stop_reason(&state, reason);
+}
+
+#[cfg(test)]
+fn assert_debug_state(seconds: u64, ingots: u32, ore: u32, coal: u32) {
+    let state = debug_engine(10).state_at(seconds).unwrap();
+    assert_state_time(&state, seconds);
+    assert_computed_resources(&state, ingots, ore, coal);
+    assert_stop_reason(&state, None);
+}
+
+#[cfg(test)]
+fn output_full_reason() -> Option<StopReason> {
+    Some(StopReason::OutputFull)
+}
+
+#[cfg(test)]
+fn no_stop_reason() -> Option<StopReason> {
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn create_test_base_state() -> BaseState {
-        let mut resources = HashMap::new();
-        resources.insert("coal".to_string(), 32);
-        resources.insert("iron_ore".to_string(), 128);
-        resources.insert("iron_ingot".to_string(), 0);
+    #[test]
+    fn it_works_600s() {
+        assert_simulated_world(600, 60, 68, 24);
+    }
 
-        let mut capacities = HashMap::new();
-        capacities.insert("iron_ingot".to_string(), 64);
-
-        let transformer = Transformer {
-            id: "furnace_1".to_string(),
-            input_id: "iron_ore".to_string(),
-            input_qty: 1,
-            fuel_id: "coal".to_string(),
-            fuel_ops: 8,
-            output_id: "iron_ingot".to_string(),
-            output_qty: 1,
-            duration_secs: 10,
-        };
-
-        BaseState {
-            time: 0,
-            resources,
-            capacities,
-            transformers: vec![transformer],
-            transformer_states: HashMap::new(),
-        }
+    #[test]
+    fn it_works_640s() {
+        assert_simulated_world(640, 64, 64, 24);
     }
 
     #[test]
     fn test_furnace_line_debug_tick_600s() {
-        let base_state = create_test_base_state();
-        let engine = SimulationEngine::new(
-            base_state,
-            SimMode::DebugTick(DebugTickConfig {
-                tick_duration_secs: 10,
-            }),
-        );
-
-        let state = engine.state_at(600).unwrap();
-        assert_eq!(state.time, 600);
-        assert_eq!(state.resources.get("iron_ingot"), Some(&60));
-        assert_eq!(state.resources.get("iron_ore"), Some(&68));
-        assert_eq!(state.resources.get("coal"), Some(&24)); // 60 ops / 8 ops_per_coal = 7.5 -> 8 coal consumed, 32 - 8 = 24
-        assert_eq!(state.stop_reason, None);
+        assert_debug_state(600, 60, 68, 24);
     }
 
     #[test]
     fn test_furnace_line_predictive_600s() {
-        let base_state = create_test_base_state();
-        let engine = SimulationEngine::new(base_state, SimMode::Predictive(PredictiveConfig {}));
-
-        let state = engine.state_at(600).unwrap();
-        assert_eq!(state.time, 600);
-        assert_eq!(state.resources.get("iron_ingot"), Some(&60));
-        assert_eq!(state.resources.get("iron_ore"), Some(&68));
-        assert_eq!(state.resources.get("coal"), Some(&24));
-        assert_eq!(state.stop_reason, None);
+        assert_predictive_state(600, 600, 60, 68, 24, no_stop_reason());
     }
 
     #[test]
     fn test_furnace_line_predictive_640s_output_full() {
-        let base_state = create_test_base_state();
-        let engine = SimulationEngine::new(base_state, SimMode::Predictive(PredictiveConfig {}));
-
-        // At 640s, we try to do 64 ops. Output capacity is 64.
-        let state = engine.state_at(640).unwrap();
-        assert_eq!(state.time, 640);
-        assert_eq!(state.resources.get("iron_ingot"), Some(&64));
-        assert_eq!(state.resources.get("iron_ore"), Some(&64));
-        assert_eq!(state.resources.get("coal"), Some(&24)); // 64 ops / 8 = 8 coal consumed. 32-8 = 24.
-        assert_eq!(state.stop_reason, Some(StopReason::OutputFull));
-
-        // Let's try 700s to make sure it stops at 640s
-        let state2 = engine.state_at(700).unwrap();
-        assert_eq!(state2.time, 640);
-        assert_eq!(state2.stop_reason, Some(StopReason::OutputFull));
+        assert_predictive_state(640, 640, 64, 64, 24, output_full_reason());
+        assert_predictive_state(700, 640, 64, 64, 24, output_full_reason());
     }
 
     #[test]
     fn test_predictive_matches_debug_tick() {
-        let base_state = create_test_base_state();
-        let engine_debug = SimulationEngine::new(
-            base_state.clone(),
-            SimMode::DebugTick(DebugTickConfig {
-                tick_duration_secs: 1,
-            }),
-        );
-        let engine_pred =
-            SimulationEngine::new(base_state, SimMode::Predictive(PredictiveConfig {}));
-
-        let state_debug = engine_debug.state_at(600).unwrap();
-        let state_pred = engine_pred.state_at(600).unwrap();
-
-        assert_eq!(state_debug.time, state_pred.time);
-        assert_eq!(state_debug.resources, state_pred.resources);
-        assert_eq!(state_debug.stop_reason, state_pred.stop_reason);
+        assert_prediction_matches_debug(600);
     }
 
     #[test]
     fn test_materialize_at_commits_state() {
-        let base_state = create_test_base_state();
-        let mut engine =
-            SimulationEngine::new(base_state, SimMode::Predictive(PredictiveConfig {}));
-
-        engine.materialize_at(600).unwrap();
-
-        assert_eq!(engine.base_state.time, 600);
-        assert_eq!(engine.base_state.resources.get("iron_ingot"), Some(&60));
-        assert_eq!(engine.base_state.resources.get("coal"), Some(&24));
+        assert_materialized_state(600, 60, 24);
     }
 
     #[test]
     fn test_no_negative_resources() {
-        let mut base_state = create_test_base_state();
-        // Start with only 1 ore
-        base_state.resources.insert("iron_ore".to_string(), 1);
-
-        let engine = SimulationEngine::new(base_state, SimMode::Predictive(PredictiveConfig {}));
-        let state = engine.state_at(600).unwrap();
-
-        // Should stop early due to empty input
-        assert_eq!(state.time, 10);
-        assert_eq!(state.resources.get("iron_ingot"), Some(&1));
-        assert_eq!(state.resources.get("iron_ore"), Some(&0));
-        assert_eq!(state.stop_reason, Some(StopReason::InputEmpty));
+        assert_sparse_input_stop(1, 600, 10, 1);
     }
 
     #[test]
     fn test_system_stops_when_output_full() {
-        let mut base_state = create_test_base_state();
-        // Set capacity very low
-        base_state.capacities.insert("iron_ingot".to_string(), 5);
-
-        let engine = SimulationEngine::new(
-            base_state,
-            SimMode::DebugTick(DebugTickConfig {
-                tick_duration_secs: 10,
-            }),
-        );
-
-        // Try to run for 600s
-        let state = engine.state_at(600).unwrap();
-
-        // It should stop as soon as output hits 5
-        // Since duration is 10s and it outputs 1 per 10s, it outputs 5 at 50s.
-        // But the debug loop checks current_time < target_time. If it hits an error at 50s,
-        // the step_debug returned 50s and an error, next tick it will add 10s and report 60s and an error.
-        assert_eq!(state.time, 60);
-        assert_eq!(state.resources.get("iron_ingot"), Some(&5));
-        assert_eq!(state.stop_reason, Some(StopReason::OutputFull));
+        assert_low_capacity_stop(5, 600, 60);
     }
 }
