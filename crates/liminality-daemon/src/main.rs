@@ -14,7 +14,7 @@ use axum::{
 use clap::{Parser, Subcommand};
 use liminality_engine::simulate_furnace_line;
 use liminality_model::WorldModel;
-use liminality_protocol::{Query as ProtocolQuery, Response as ProtocolResponse, WorldSnapshot};
+use liminality_protocol::{DemoQuery, DemoResponse, DemoWorldSnapshot};
 use serde::Deserialize;
 use std::sync::{Arc, Mutex};
 use tracing::{Level, info};
@@ -85,18 +85,18 @@ async fn health_handler() -> impl IntoResponse {
     (StatusCode::OK, "OK")
 }
 
-async fn snapshot_handler(State(state): State<Arc<AppState>>) -> Json<WorldSnapshot> {
+async fn snapshot_handler(State(state): State<Arc<AppState>>) -> Json<DemoWorldSnapshot> {
     let model = {
         let lock = state.model.lock().unwrap();
         lock.clone()
     };
-    Json(WorldSnapshot { state: model })
+    Json(DemoWorldSnapshot { state: model })
 }
 
 async fn query_handler(
     State(state): State<Arc<AppState>>,
-    Json(payload): Json<ProtocolQuery>,
-) -> Json<ProtocolResponse> {
+    Json(payload): Json<DemoQuery>,
+) -> Json<DemoResponse> {
     let model = {
         let lock = state.model.lock().unwrap();
         lock.clone()
@@ -104,8 +104,8 @@ async fn query_handler(
 
     let result_state = simulate_furnace_line(&model, payload.seconds);
 
-    Json(ProtocolResponse {
-        state: WorldSnapshot {
+    Json(DemoResponse {
+        state: DemoWorldSnapshot {
             state: result_state,
         },
     })
@@ -119,7 +119,7 @@ struct DemoStateQuery {
 async fn demo_state_handler(
     State(state): State<Arc<AppState>>,
     Query(query): Query<DemoStateQuery>,
-) -> Json<WorldSnapshot> {
+) -> Json<DemoWorldSnapshot> {
     let model = {
         let lock = state.model.lock().unwrap();
         lock.clone()
@@ -127,7 +127,7 @@ async fn demo_state_handler(
 
     let result_state = simulate_furnace_line(&model, query.seconds);
 
-    Json(WorldSnapshot {
+    Json(DemoWorldSnapshot {
         state: result_state,
     })
 }
@@ -187,7 +187,7 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::OK);
 
-        let snapshot: WorldSnapshot = response.json().await.unwrap();
+        let snapshot: DemoWorldSnapshot = response.json().await.unwrap();
         assert_eq!(snapshot.state.coal_storage, 32);
         assert_eq!(snapshot.state.ore_storage, 128);
         assert_eq!(snapshot.state.output_storage, 0);
@@ -202,7 +202,7 @@ mod tests {
             axum::serve(listener, app_for_test()).await.unwrap();
         });
 
-        let query = ProtocolQuery { seconds: 600 };
+        let query = DemoQuery { seconds: 600 };
         let client = reqwest::Client::new();
         let response = client
             .post(format!("http://{}/query", addr))
@@ -213,7 +213,7 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::OK);
 
-        let resp: ProtocolResponse = response.json().await.unwrap();
+        let resp: DemoResponse = response.json().await.unwrap();
         assert_eq!(resp.state.state.output_storage, 60);
         assert_eq!(resp.state.state.ore_storage, 68);
         assert_eq!(resp.state.state.coal_storage, 24);
@@ -240,7 +240,7 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::OK);
 
-        let snapshot: WorldSnapshot = response.json().await.unwrap();
+        let snapshot: DemoWorldSnapshot = response.json().await.unwrap();
         assert_eq!(snapshot.state.output_storage, 64);
         assert_eq!(snapshot.state.ore_storage, 64);
         assert_eq!(snapshot.state.coal_storage, 24);

@@ -1,20 +1,26 @@
-//! liminality-model
+//! The pure data model for Liminality.
 //!
-//! This crate contains the pure data model for liminality.
-//! It defines spatial/time primitives and base graph/resource structures.
-//!
-//! It contains no simulation logic, no networking, and no daemon/runtime behavior.
+//! This crate contains the canonical simulation model plus a few root-level
+//! DTOs that the protocol crate already consumes.
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Position {
     pub x: f64,
     pub y: f64,
     pub z: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct SpacePos {
+    pub w: String,
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Resource {
     pub id: String,
     pub quantity: u32,
